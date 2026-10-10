@@ -1,0 +1,4 @@
+server
+*.md
+.git
+.gitignore
