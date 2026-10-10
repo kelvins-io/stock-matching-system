@@ -71,7 +71,7 @@ async function onLogin() {
   try {
     await auth.login(form.username, form.password)
     ElMessage.success('登录成功')
-    router.push('/')
+    router.push(auth.isAdmin ? '/' : '/trade')
   } finally {
     loading.value = false
   }
@@ -86,7 +86,7 @@ async function onRegister() {
   try {
     await auth.register(form.username, form.password)
     ElMessage.success('注册成功')
-    router.push('/')
+    router.push('/trade')
   } finally {
     loading.value = false
   }

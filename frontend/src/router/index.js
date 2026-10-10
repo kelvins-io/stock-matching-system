@@ -7,7 +7,7 @@ const routes = [
     path: '/',
     component: () => import('../layouts/MainLayout.vue'),
     children: [
-      { path: '', name: 'market', component: () => import('../views/Market.vue') },
+      { path: '', name: 'market', component: () => import('../views/Market.vue'), meta: { auth: true, admin: true } },
       { path: 'trade', name: 'trade', component: () => import('../views/Trade.vue'), meta: { auth: true } },
       { path: 'orders', name: 'orders', component: () => import('../views/Orders.vue'), meta: { auth: true } },
       { path: 'admin', name: 'admin', component: () => import('../views/Admin.vue'), meta: { auth: true, admin: true } }
@@ -20,11 +20,15 @@ const router = createRouter({
   routes
 })
 
+function homePath(auth) {
+  return auth.isAdmin ? '/' : '/trade'
+}
+
 router.beforeEach((to) => {
   const auth = useAuthStore()
   if (to.meta.auth && !auth.isLogin) return '/login'
-  if (to.meta.admin && !auth.isAdmin) return '/'
-  if (to.name === 'login' && auth.isLogin) return '/'
+  if (to.meta.admin && !auth.isAdmin) return homePath(auth)
+  if (to.name === 'login' && auth.isLogin) return homePath(auth)
   return true
 })
 

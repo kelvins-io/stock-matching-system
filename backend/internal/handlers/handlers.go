@@ -48,7 +48,6 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 		api.GET("/market/status", h.MarketStatus)
 		api.GET("/stocks", h.ListStocks)
 		api.GET("/stocks/quotes", h.Quotes)
-		api.GET("/market/summary", h.DailySummary)
 		api.GET("/trades/recent", h.RecentTrades)
 		api.GET("/stocks/:id/orderbook", h.OrderBook)
 		api.GET("/stocks/:id/kline", h.Klines)
@@ -67,6 +66,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 			admin := auth.Group("/admin")
 			admin.Use(middleware.AdminRequired())
 			{
+				admin.GET("/market/summary", h.DailySummary)
 				admin.POST("/stocks", h.IssueStock)
 				admin.PUT("/stocks/:id", h.UpdateStock)
 				admin.GET("/market/rules", h.GetMarketRule)

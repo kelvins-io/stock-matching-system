@@ -191,7 +191,7 @@ function renderCharts() {
 }
 
 async function loadSummary() {
-  const s = await http.get('/market/summary')
+  const s = await http.get('/admin/market/summary')
   Object.assign(summary, s || {})
   renderCharts()
 }

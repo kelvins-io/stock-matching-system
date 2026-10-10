@@ -110,7 +110,7 @@ npm run dev
 | GET | `/stocks` | 股票列表 |
 | GET | `/stocks/quotes` | 行情 |
 | GET | `/market/status` | 开市状态 |
-| GET | `/market/summary` | 当日交易汇总 |
+| GET | `/admin/market/summary` | 当日交易汇总（仅管理员；交易大盘） |
 | GET | `/stocks/:id/orderbook` | 五档盘口 |
 | GET | `/stocks/:id/kline?interval=1d&limit=120` | K 线（1m/5m/15m/1d） |
 | GET | `/market/stream` | SSE 实时行情（tick：报价/成交/K线） |

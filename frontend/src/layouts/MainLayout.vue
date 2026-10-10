@@ -17,7 +17,7 @@
         text-color="#3b4a63"
         active-text-color="#3b6dff"
       >
-        <el-menu-item index="/">交易大盘</el-menu-item>
+        <el-menu-item v-if="auth.isAdmin" index="/">交易大盘</el-menu-item>
         <el-menu-item index="/trade">买卖下单</el-menu-item>
         <el-menu-item index="/orders">我的委托</el-menu-item>
         <el-menu-item v-if="auth.isAdmin" index="/admin">系统管理</el-menu-item>
