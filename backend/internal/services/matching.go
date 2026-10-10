@@ -19,11 +19,13 @@ type MatchingEngine struct {
 	db     *gorm.DB
 	cache  *cache.RedisCache
 	market *MarketService
+	kline  *KlineService
+	hub    *MarketHub
 	mu     sync.Mutex
 }
 
-func NewMatchingEngine(db *gorm.DB, c *cache.RedisCache, market *MarketService) *MatchingEngine {
-	return &MatchingEngine{db: db, cache: c, market: market}
+func NewMatchingEngine(db *gorm.DB, c *cache.RedisCache, market *MarketService, kline *KlineService, hub *MarketHub) *MatchingEngine {
+	return &MatchingEngine{db: db, cache: c, market: market, kline: kline, hub: hub}
 }
 
 type PlaceOrderReq struct {
@@ -53,6 +55,7 @@ func (e *MatchingEngine) PlaceOrder(userID uuid.UUID, req PlaceOrderReq) (*model
 	}
 
 	var order models.Order
+	var trades []models.Trade
 	err = e.db.Transaction(func(tx *gorm.DB) error {
 		var stock models.Stock
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -117,17 +120,18 @@ func (e *MatchingEngine) PlaceOrder(userID uuid.UUID, req PlaceOrderReq) (*model
 			return err
 		}
 
-		return e.match(tx, &order, &stock)
+		return e.match(tx, &order, &stock, &trades)
 	})
 	if err != nil {
 		return nil, err
 	}
 
 	e.invalidateCache(order.StockCode)
+	e.publishTick(order.StockID, trades)
 	return &order, nil
 }
 
-func (e *MatchingEngine) match(tx *gorm.DB, incoming *models.Order, stock *models.Stock) error {
+func (e *MatchingEngine) match(tx *gorm.DB, incoming *models.Order, stock *models.Stock, trades *[]models.Trade) error {
 	for incoming.Remaining() > 0 {
 		var opposite models.Order
 		q := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -157,7 +161,7 @@ func (e *MatchingEngine) match(tx *gorm.DB, incoming *models.Order, stock *model
 		tradeQty := min64(incoming.Remaining(), opposite.Remaining())
 		// 成交价取先挂单价格（对手方价格）
 		tradePrice := opposite.Price
-		if err := e.executeTrade(tx, stock, incoming, &opposite, tradePrice, tradeQty); err != nil {
+		if err := e.executeTrade(tx, stock, incoming, &opposite, tradePrice, tradeQty, trades); err != nil {
 			return err
 		}
 	}
@@ -174,6 +178,7 @@ func (e *MatchingEngine) executeTrade(
 	a, b *models.Order,
 	price float64,
 	qty int64,
+	trades *[]models.Trade,
 ) error {
 	buy, sell := a, b
 	if a.Side == models.SideSell {
@@ -194,6 +199,9 @@ func (e *MatchingEngine) executeTrade(
 	}
 	if err := tx.Create(&trade).Error; err != nil {
 		return err
+	}
+	if trades != nil {
+		*trades = append(*trades, trade)
 	}
 
 	buy.FilledQty += qty
@@ -225,7 +233,39 @@ func (e *MatchingEngine) executeTrade(
 	}
 	stock.Volume += qty
 	stock.Amount += amount
+
+	if e.kline != nil {
+		if err := e.kline.ApplyTrade(tx, stock.ID, price, qty, amount, time.Now()); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+type TickPayload struct {
+	StockID string                 `json:"stock_id"`
+	Quote   QuoteView              `json:"quote"`
+	Trades  []models.Trade         `json:"trades,omitempty"`
+	Klines  map[string]*models.Kline `json:"klines,omitempty"`
+}
+
+func (e *MatchingEngine) publishTick(stockID uuid.UUID, trades []models.Trade) {
+	if e.hub == nil {
+		return
+	}
+	var stock models.Stock
+	if err := e.db.First(&stock, "id = ?", stockID).Error; err != nil {
+		return
+	}
+	payload := TickPayload{
+		StockID: stockID.String(),
+		Quote:   ToQuoteView(&stock),
+		Trades:  trades,
+	}
+	if e.kline != nil {
+		payload.Klines = e.kline.LatestBars(stockID)
+	}
+	e.hub.Publish("tick", payload)
 }
 
 func (e *MatchingEngine) settleBuyer(tx *gorm.DB, buy *models.Order, stock *models.Stock, price float64, qty int64) error {
@@ -344,6 +384,7 @@ func (e *MatchingEngine) CancelOrder(userID uuid.UUID, orderID uuid.UUID) (*mode
 		return nil, err
 	}
 	e.invalidateCache(order.StockCode)
+	e.publishTick(order.StockID, nil)
 	return &order, nil
 }
 

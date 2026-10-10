@@ -49,17 +49,22 @@ func main() {
 	}
 
 	jwtAuth := middleware.NewJWTAuth(cfg.JWTSecret, cfg.JWTExpire)
+	hub := services.NewMarketHub()
+	klineSvc := services.NewKlineService(db)
+	if err := klineSvc.SeedMissingDaily(60); err != nil {
+		log.Printf("seed klines warning: %v", err)
+	}
 	authSvc := services.NewAuthService(db, jwtAuth)
-	stockSvc := services.NewStockService(db, rdb)
+	stockSvc := services.NewStockService(db, rdb, klineSvc)
 	marketSvc := services.NewMarketService(db, rdb)
 	orderSvc := services.NewOrderService(db)
-	matcher := services.NewMatchingEngine(db, rdb, marketSvc)
+	matcher := services.NewMatchingEngine(db, rdb, marketSvc, klineSvc, hub)
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery(), gin.Logger(), middleware.CORS())
 
-	h := handlers.New(authSvc, stockSvc, marketSvc, orderSvc, matcher, jwtAuth)
+	h := handlers.New(authSvc, stockSvc, marketSvc, orderSvc, matcher, jwtAuth, klineSvc, hub)
 	h.RegisterRoutes(r)
 
 	log.Printf("stock matching API listening on :%s", cfg.Port)

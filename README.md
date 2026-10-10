@@ -112,6 +112,8 @@ npm run dev
 | GET | `/market/status` | 开市状态 |
 | GET | `/market/summary` | 当日交易汇总 |
 | GET | `/stocks/:id/orderbook` | 五档盘口 |
+| GET | `/stocks/:id/kline?interval=1d&limit=120` | K 线（1m/5m/15m/1d） |
+| GET | `/market/stream` | SSE 实时行情（tick：报价/成交/K线） |
 | POST | `/orders` | 下单 |
 | DELETE | `/orders/:id` | 撤单 |
 | GET | `/orders` | 我的委托 |
@@ -131,6 +133,15 @@ curl -X POST http://localhost:10020/api/v1/orders \
   -H "Content-Type: application/json" \
   -d '{"stock_id":"<uuid>","side":"buy","price":10.50,"quantity":100}'
 ```
+
+## 实时行情（SSE）
+
+前端通过 `EventSource` 连接 `/api/v1/market/stream`（可选 `?stock_id=` 过滤）：
+
+- `connected` / `heartbeat`：连接与保活
+- `tick`：撮合/撤单后推送，包含最新 `quote`、本次 `trades`、各周期最新 `klines`
+
+历史 K 线仍用 REST 拉取；当前蜡烛由 SSE 增量更新。
 
 ## 撮合规则说明
 

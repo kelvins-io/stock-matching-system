@@ -15,10 +15,11 @@ import (
 type StockService struct {
 	db    *gorm.DB
 	cache *cache.RedisCache
+	kline *KlineService
 }
 
-func NewStockService(db *gorm.DB, c *cache.RedisCache) *StockService {
-	return &StockService{db: db, cache: c}
+func NewStockService(db *gorm.DB, c *cache.RedisCache, kline *KlineService) *StockService {
+	return &StockService{db: db, cache: c, kline: kline}
 }
 
 type IssueStockReq struct {
@@ -58,6 +59,9 @@ func (s *StockService) Issue(req IssueStockReq) (*models.Stock, error) {
 			return nil, errors.New("股票代码已存在")
 		}
 		return nil, err
+	}
+	if s.kline != nil {
+		_ = s.kline.SeedDailyHistory(&stock, 60)
 	}
 	return &stock, nil
 }
@@ -125,31 +129,44 @@ type QuoteView struct {
 	Status        string    `json:"status"`
 }
 
+func ToQuoteView(st *models.Stock) QuoteView {
+	return QuoteView{
+		ID:            st.ID,
+		Code:          st.Code,
+		Name:          st.Name,
+		CurrentPrice:  st.CurrentPrice,
+		PrevClose:     st.PrevClose,
+		HighPrice:     st.HighPrice,
+		LowPrice:      st.LowPrice,
+		Volume:        st.Volume,
+		Amount:        st.Amount,
+		ChangePct:     st.ChangePct(),
+		LimitUp:       st.LimitUp(),
+		LimitDown:     st.LimitDown(),
+		PriceLimitPct: st.PriceLimitPct,
+		Status:        string(st.Status),
+	}
+}
+
 func (s *StockService) Quotes() ([]QuoteView, error) {
 	stocks, err := s.List()
 	if err != nil {
 		return nil, err
 	}
 	views := make([]QuoteView, 0, len(stocks))
-	for _, st := range stocks {
-		views = append(views, QuoteView{
-			ID:            st.ID,
-			Code:          st.Code,
-			Name:          st.Name,
-			CurrentPrice:  st.CurrentPrice,
-			PrevClose:     st.PrevClose,
-			HighPrice:     st.HighPrice,
-			LowPrice:      st.LowPrice,
-			Volume:        st.Volume,
-			Amount:        st.Amount,
-			ChangePct:     st.ChangePct(),
-			LimitUp:       st.LimitUp(),
-			LimitDown:     st.LimitDown(),
-			PriceLimitPct: st.PriceLimitPct,
-			Status:        string(st.Status),
-		})
+	for i := range stocks {
+		views = append(views, ToQuoteView(&stocks[i]))
 	}
 	return views, nil
+}
+
+func (s *StockService) QuoteByID(id uuid.UUID) (*QuoteView, error) {
+	st, err := s.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+	q := ToQuoteView(st)
+	return &q, nil
 }
 
 type DailySummary struct {

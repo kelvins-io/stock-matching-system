@@ -25,6 +25,20 @@
       </div>
     </div>
 
+    <div class="card" style="margin-bottom:16px">
+      <div class="kline-head">
+        <el-select v-model="klineStockId" placeholder="选择股票" style="width: 220px" filterable>
+          <el-option
+            v-for="q in quotes"
+            :key="q.id"
+            :label="`${q.code} ${q.name}`"
+            :value="q.id"
+          />
+        </el-select>
+      </div>
+      <KlineChart :stock-id="klineStockId" :title="klineTitle" height="420px" />
+    </div>
+
     <el-row :gutter="16">
       <el-col :span="14">
         <div class="card">
@@ -42,7 +56,15 @@
 
     <div class="card" style="margin-top:16px">
       <div class="card-title">行情列表</div>
-      <el-table :data="quotes" stripe height="420">
+      <el-table
+        ref="quoteTableRef"
+        :data="quotes"
+        row-key="id"
+        stripe
+        height="420"
+        highlight-current-row
+        @row-click="onQuoteClick"
+      >
         <el-table-column prop="code" label="代码" width="100" />
         <el-table-column prop="name" label="名称" width="120" />
         <el-table-column label="最新价" width="110">
@@ -75,11 +97,15 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import * as echarts from 'echarts'
 import http from '../api/http'
+import { connectMarketStream } from '../api/marketStream'
+import KlineChart from '../components/KlineChart.vue'
 
 const quotes = ref([])
+const klineStockId = ref('')
+const quoteTableRef = ref()
 const summary = reactive({
   total_amount: 0,
   total_volume: 0,
@@ -91,7 +117,26 @@ const summary = reactive({
 })
 const chartRef = ref()
 const pieRef = ref()
-let chart, pie, timer
+const streamStatus = ref('')
+let chart, pie, disconnectStream, summaryTimer
+
+const klineTitle = computed(() => {
+  const q = quotes.value.find((i) => i.id === klineStockId.value)
+  return q ? `${q.code} ${q.name} K线` : 'K线图'
+})
+
+async function restoreQuoteRow() {
+  if (!klineStockId.value) return
+  const row = quotes.value.find((q) => q.id === klineStockId.value)
+  if (!row) return
+  await nextTick()
+  quoteTableRef.value?.setCurrentRow(row)
+}
+
+function onQuoteClick(row) {
+  if (!row) return
+  klineStockId.value = row.id
+}
 
 function formatMoney(v) {
   return Number(v || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -145,16 +190,49 @@ function renderCharts() {
   })
 }
 
-async function load() {
-  const [q, s] = await Promise.all([http.get('/stocks/quotes'), http.get('/market/summary')])
-  quotes.value = q || []
+async function loadSummary() {
+  const s = await http.get('/market/summary')
   Object.assign(summary, s || {})
   renderCharts()
 }
 
-onMounted(() => {
-  load()
-  timer = setInterval(load, 4000)
+async function loadQuotesOnce() {
+  quotes.value = (await http.get('/stocks/quotes')) || []
+  if (!klineStockId.value && quotes.value.length) {
+    klineStockId.value = quotes.value[0].id
+  }
+  await restoreQuoteRow()
+}
+
+function patchQuote(q) {
+  if (!q?.id) return
+  const idx = quotes.value.findIndex((i) => i.id === q.id)
+  if (idx >= 0) {
+    const next = quotes.value.slice()
+    next[idx] = { ...next[idx], ...q }
+    quotes.value = next
+  } else {
+    quotes.value = [...quotes.value, q]
+  }
+  restoreQuoteRow()
+}
+
+async function load() {
+  await Promise.all([loadQuotesOnce(), loadSummary()])
+}
+
+onMounted(async () => {
+  await load()
+  disconnectStream = connectMarketStream({
+    onStatus: (s) => { streamStatus.value = s },
+    onTick: (payload) => {
+      if (payload?.quote) patchQuote(payload.quote)
+      // 有成交时刷新汇总图
+      if (payload?.trades?.length) loadSummary()
+    }
+  })
+  // 汇总兜底低频刷新（无成交时涨跌分布仍可更新）
+  summaryTimer = setInterval(loadSummary, 30000)
   window.addEventListener('resize', () => {
     chart?.resize()
     pie?.resize()
@@ -162,7 +240,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  clearInterval(timer)
+  disconnectStream?.()
+  clearInterval(summaryTimer)
   chart?.dispose()
   pie?.dispose()
 })
@@ -172,6 +251,9 @@ onUnmounted(() => {
 .card-title {
   font-weight: 700;
   margin-bottom: 10px;
+}
+.kline-head {
+  margin-bottom: 8px;
 }
 .chart {
   height: 300px;

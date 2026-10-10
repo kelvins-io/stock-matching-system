@@ -189,3 +189,36 @@ func (h *Holding) BeforeCreate(tx *gorm.DB) error {
 func (h *Holding) Available() int64 {
 	return h.Quantity - h.FrozenQty
 }
+
+// KlineInterval K 线周期
+type KlineInterval string
+
+const (
+	Kline1m  KlineInterval = "1m"
+	Kline5m  KlineInterval = "5m"
+	Kline15m KlineInterval = "15m"
+	Kline1d  KlineInterval = "1d"
+)
+
+// Kline OHLC K 线蜡烛
+type Kline struct {
+	ID        uuid.UUID     `gorm:"type:uuid;primaryKey" json:"id"`
+	StockID   uuid.UUID     `gorm:"type:uuid;uniqueIndex:idx_kline_bar;not null" json:"stock_id"`
+	Interval  KlineInterval `gorm:"size:8;uniqueIndex:idx_kline_bar;not null" json:"interval"`
+	OpenTime  time.Time     `gorm:"uniqueIndex:idx_kline_bar;not null" json:"open_time"`
+	Open      float64       `gorm:"type:numeric(18,4);not null" json:"open"`
+	High      float64       `gorm:"type:numeric(18,4);not null" json:"high"`
+	Low       float64       `gorm:"type:numeric(18,4);not null" json:"low"`
+	Close     float64       `gorm:"type:numeric(18,4);not null" json:"close"`
+	Volume    int64         `gorm:"not null;default:0" json:"volume"`
+	Amount    float64       `gorm:"type:numeric(20,2);not null;default:0" json:"amount"`
+	CreatedAt time.Time     `json:"created_at"`
+	UpdatedAt time.Time     `json:"updated_at"`
+}
+
+func (k *Kline) BeforeCreate(tx *gorm.DB) error {
+	if k.ID == uuid.Nil {
+		k.ID = uuid.New()
+	}
+	return nil
+}

@@ -38,6 +38,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&models.Order{},
 		&models.Trade{},
 		&models.Holding{},
+		&models.Kline{},
 	)
 }
 

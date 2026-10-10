@@ -1,10 +1,25 @@
 <template>
   <div class="page">
+    <div class="card" style="margin-bottom:16px">
+      <KlineChart
+        :stock-id="selected?.id || ''"
+        :title="selected ? `${selected.code} ${selected.name} K线` : 'K线图'"
+        height="380px"
+        default-interval="1d"
+      />
+    </div>
     <el-row :gutter="16">
       <el-col :span="14">
         <div class="card">
           <div class="card-title">选择股票</div>
-          <el-table :data="quotes" highlight-current-row @current-change="onSelect" height="520">
+          <el-table
+            ref="tableRef"
+            :data="quotes"
+            row-key="id"
+            highlight-current-row
+            height="420"
+            @row-click="onSelect"
+          >
             <el-table-column prop="code" label="代码" width="90" />
             <el-table-column prop="name" label="名称" width="110" />
             <el-table-column label="最新价" width="100">
@@ -100,19 +115,23 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, reactive, ref } from 'vue'
+import { nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import http from '../api/http'
+import { connectMarketStream } from '../api/marketStream'
 import { useAuthStore } from '../stores/auth'
+import KlineChart from '../components/KlineChart.vue'
 
 const auth = useAuthStore()
+const tableRef = ref()
 const quotes = ref([])
 const holdings = ref([])
 const selected = ref(null)
+const selectedId = ref('')
 const loading = ref(false)
 const book = reactive({ bids: [], asks: [] })
 const form = reactive({ side: 'buy', price: 0, quantity: 100 })
-let timer
+let disconnectStream
 
 function chgClass(p) {
   if (p > 0) return 'up'
@@ -120,8 +139,31 @@ function chgClass(p) {
   return 'flat'
 }
 
+async function restoreCurrentRow() {
+  if (!selectedId.value) return
+  const row = quotes.value.find((q) => q.id === selectedId.value)
+  if (!row) return
+  selected.value = row
+  await nextTick()
+  tableRef.value?.setCurrentRow(row)
+}
+
 async function loadQuotes() {
-  quotes.value = await http.get('/stocks/quotes')
+  quotes.value = await http.get('/stocks/quotes') || []
+  await restoreCurrentRow()
+}
+
+function patchQuote(q) {
+  if (!q?.id) return
+  const idx = quotes.value.findIndex((i) => i.id === q.id)
+  if (idx >= 0) {
+    const next = quotes.value.slice()
+    next[idx] = { ...next[idx], ...q }
+    quotes.value = next
+  } else {
+    quotes.value = [...quotes.value, q]
+  }
+  restoreCurrentRow()
 }
 
 async function loadHoldings() {
@@ -129,26 +171,29 @@ async function loadHoldings() {
 }
 
 async function loadBook() {
-  if (!selected.value) return
-  const data = await http.get(`/stocks/${selected.value.id}/orderbook`)
+  if (!selectedId.value) return
+  const data = await http.get(`/stocks/${selectedId.value}/orderbook`)
   book.bids = data.bids || []
   book.asks = data.asks || []
 }
 
 function onSelect(row) {
+  if (!row) return
+  const switched = selectedId.value !== row.id
+  selectedId.value = row.id
   selected.value = row
-  if (row) {
+  if (switched) {
     form.price = Number(row.current_price.toFixed(2))
-    loadBook()
   }
+  loadBook()
 }
 
 async function submit() {
-  if (!selected.value) return
+  if (!selectedId.value) return
   loading.value = true
   try {
     await http.post('/orders', {
-      stock_id: selected.value.id,
+      stock_id: selectedId.value,
       side: form.side,
       price: form.price,
       quantity: form.quantity
@@ -162,13 +207,21 @@ async function submit() {
 
 onMounted(async () => {
   await Promise.all([loadQuotes(), loadHoldings()])
-  timer = setInterval(async () => {
-    await loadQuotes()
-    await loadBook()
-  }, 4000)
+  if (quotes.value.length && !selectedId.value) {
+    onSelect(quotes.value[0])
+    await restoreCurrentRow()
+  }
+  disconnectStream = connectMarketStream({
+    onTick: (payload) => {
+      if (payload?.quote) patchQuote(payload.quote)
+      if (payload?.stock_id && payload.stock_id === selectedId.value) {
+        loadBook()
+      }
+    }
+  })
 })
 
-onUnmounted(() => clearInterval(timer))
+onUnmounted(() => disconnectStream?.())
 </script>
 
 <style scoped>

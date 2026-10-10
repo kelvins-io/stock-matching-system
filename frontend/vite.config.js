@@ -9,7 +9,14 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: process.env.VITE_API_PROXY || 'http://localhost:10020',
-        changeOrigin: true
+        changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq, req) => {
+            if (req.url?.includes('/market/stream')) {
+              proxyReq.setHeader('Accept', 'text/event-stream')
+            }
+          })
+        }
       }
     }
   },

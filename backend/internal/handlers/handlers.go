@@ -2,10 +2,12 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/kelvins-io/stock-matching-system/internal/middleware"
+	"github.com/kelvins-io/stock-matching-system/internal/models"
 	"github.com/kelvins-io/stock-matching-system/internal/services"
 )
 
@@ -15,6 +17,8 @@ type Handler struct {
 	market  *services.MarketService
 	order   *services.OrderService
 	matcher *services.MatchingEngine
+	kline   *services.KlineService
+	hub     *services.MarketHub
 	jwt     *middleware.JWTAuth
 }
 
@@ -25,8 +29,10 @@ func New(
 	order *services.OrderService,
 	matcher *services.MatchingEngine,
 	jwt *middleware.JWTAuth,
+	kline *services.KlineService,
+	hub *services.MarketHub,
 ) *Handler {
-	return &Handler{auth: auth, stock: stock, market: market, order: order, matcher: matcher, jwt: jwt}
+	return &Handler{auth: auth, stock: stock, market: market, order: order, matcher: matcher, jwt: jwt, kline: kline, hub: hub}
 }
 
 func (h *Handler) RegisterRoutes(r *gin.Engine) {
@@ -45,6 +51,8 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 		api.GET("/market/summary", h.DailySummary)
 		api.GET("/trades/recent", h.RecentTrades)
 		api.GET("/stocks/:id/orderbook", h.OrderBook)
+		api.GET("/stocks/:id/kline", h.Klines)
+		api.GET("/market/stream", h.MarketStream)
 
 		auth := api.Group("")
 		auth.Use(h.jwt.Required())
@@ -288,4 +296,25 @@ func (h *Handler) OrderBook(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, book)
+}
+
+func (h *Handler) Klines(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效 ID"})
+		return
+	}
+	interval := models.KlineInterval(c.DefaultQuery("interval", "1d"))
+	limit := 120
+	if v := c.Query("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			limit = n
+		}
+	}
+	bars, err := h.kline.List(id, interval, limit)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, bars)
 }
